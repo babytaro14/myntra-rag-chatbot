@@ -10,12 +10,14 @@ __pycache__/
 .venv/
 venv/
 
-# Raw data & built index (regenerable / large) -- NOT shipped
+# Raw data -- NOT shipped
 data/raw/
-chroma_db/
 
-# Processed CSV IS shipped (app rebuilds the index from it on startup),
-# so only ignore other processed files, not products_clean.csv
+# chroma_db IS shipped: a prebuilt 5k index so the deployed app loads instantly
+# (rebuild-on-boot loops on Streamlit Cloud's free tier). Local full rebuilds
+# with build_index.py simply overwrite it.
+
+# Ship only products_clean.csv (the 5k subset); keep the full backup local-only
 data/processed/*
 !data/processed/products_clean.csv
 
