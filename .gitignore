@@ -1,0 +1,23 @@
+# Secrets
+*.env
+.env
+kaggle-rag-chatbot.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Raw data & built index (regenerable / large) -- NOT shipped
+data/raw/
+chroma_db/
+
+# Processed CSV IS shipped (app rebuilds the index from it on startup),
+# so only ignore other processed files, not products_clean.csv
+data/processed/*
+!data/processed/products_clean.csv
+
+# OS
+.DS_Store
