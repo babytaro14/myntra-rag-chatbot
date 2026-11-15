@@ -94,7 +94,7 @@ def render_products(sources: list[dict]) -> None:
 # ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("🛍️ Myntra Assistant")
-    st.caption("RAG chatbot grounded in a 14,223-product Myntra fashion catalogue.")
+    st.caption("RAG chatbot grounded in a Myntra fashion catalogue.")
 
     st.subheader("Search settings")
     use_hybrid = st.toggle("Hybrid search (semantic + keyword)", value=True,
