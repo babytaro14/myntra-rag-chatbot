@@ -13,18 +13,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 import streamlit as st
 
+# set_page_config MUST be the first Streamlit command on the page.
+st.set_page_config(page_title="Myntra Fashion Assistant", page_icon="🛍️", layout="wide")
+
 # On Streamlit Cloud the API key is provided via st.secrets; bridge it into the
 # environment so src/config.py picks it up the same way as the local .env file.
 try:
     if "OPENAI_API_KEY" in st.secrets:
         os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 except Exception:
-    pass  # no secrets file locally -> fall back to .env
+    pass  # malformed/absent secrets file -> fall back to .env locally
 
 import config
 import rag
-
-st.set_page_config(page_title="Myntra Fashion Assistant", page_icon="🛍️", layout="wide")
 
 
 @st.cache_resource(show_spinner="Building the product index (first load only, ~2 min)...")
