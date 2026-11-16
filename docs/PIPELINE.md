@@ -36,9 +36,9 @@ general knowledge.
   numbers add noise to embeddings and are enforced by filters instead.
 
 ## 3. Chunking strategy: one chunk per product
-Each product's text is short (median ~450 characters, max ~2,000; within the
-embedding model's 512-token window for all but a handful). We deliberately **do
-not split** products.
+Each product's text is short: median 110 tokens, maximum 434, so every product
+fits inside the embedding model's 512-token window with nothing truncated. We
+deliberately **do not split** products.
 
 **Why:** a product is the natural unit of retrieval. Splitting would scatter one
 product's fabric, occasion and fit across chunks and separate them from its price.

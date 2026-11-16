@@ -117,9 +117,13 @@ _CATEGORY_RES = [(name, re.compile(pat, re.I)) for name, pat in CATEGORY_PATTERN
 _NOT_GARMENT_TOP = re.compile(r"\btop(?=[\s-]*(?:rated|rating|\d|five|ten|three|picks?|sell|quality|brands?))", re.I)
 
 
+_SAREE_BLOUSE = re.compile(r"saree\s+blouses?", re.I)
+
+
 def find_categories(text: str) -> list[str]:
     """All categories mentioned in text, ordered by where they first appear."""
     text = _NOT_GARMENT_TOP.sub(" ", str(text))
+    text = _SAREE_BLOUSE.sub("blouse", text)          # a "Saree Blouse" is a blouse, not a saree
     found = []
     for name, rx in _CATEGORY_RES:
         m = rx.search(text)

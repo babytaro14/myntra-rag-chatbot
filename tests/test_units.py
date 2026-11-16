@@ -78,6 +78,8 @@ def test_tokenizer_stems_plurals_and_drops_stopwords():
     ("Beige Striped Chanderi Cotton Silk Dupatta", "Dupatta"),
     ("Women Blue Skinny Fit Jeans", "Jeans"),
     ("Women Cable Knit Poncho", "Other"),
+    ("Women Black Solid Stretchable Saree Blouse", "Top"),
+    ("Red Silk Saree with Blouse Piece", "Saree"),
 ])
 def test_category_of(name, expected):
     assert category_of(name) == expected
@@ -152,6 +154,7 @@ def test_price_validator():
     assert rag.unsupported_prices("Now only ₹299 at 90% off!", hits, "all sarees are 90% off") == [299]
     assert rag.unsupported_prices("Both together are ₹4,998, ₹1,000 apart.", hits, "") == []
     assert rag.unsupported_prices("That is within your Rs 3000 budget.", hits, "kurta under 3000") == []
+    assert rag.unsupported_prices("Priced at ₹2\u202f999 or ₹ 1 999.", hits, "") == []      # space-grouped thousands
 
 
 def test_context_marks_data_and_sanitizes():

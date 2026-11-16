@@ -8,6 +8,7 @@ the collection with the CSV hash, row count and embedding model, which the app
 verifies at startup. See src/index.py.
 """
 
+import shutil
 import time
 
 from tqdm import tqdm
@@ -18,6 +19,9 @@ import index
 
 def main() -> None:
     df = index.read_products()
+    # Start from an empty store so the shipped database carries no dead rows from
+    # earlier builds (the SQLite file must stay under GitHub's 100 MB limit).
+    shutil.rmtree(config.CHROMA_DIR, ignore_errors=True)
     print(f"Indexing {len(df)} products with {config.EMBED_MODEL}")
     bar = tqdm(total=len(df), unit="product")
     t0 = time.time()
