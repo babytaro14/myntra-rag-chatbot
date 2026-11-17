@@ -66,8 +66,9 @@ answer unit. No overlap is needed because there is no splitting.
 ## 6. Query understanding (`src/query.py`, `rag.understand`)
 - **Deterministic parsing** (no LLM): price limits (`under 3000`, `between 1k and
   2k`), colours (a colour word maps to every catalogue shade: *blue* → Blue, Navy
-  Blue, Turquoise Blue), brands, product category, gender, and sort intent
-  (`cheapest`, `best rated`).
+  Blue, Turquoise Blue), brands, product category, gender, sort intent
+  (`cheapest`, `best rated`, `cheaper ones`), and a requested count (`show me 3
+  sarees`, `top 10 kurtas`), which overrides the sidebar's top-k (maximum 10).
 - **One small LLM call, only when needed** (there is chat history, or the question
   looks multi-part): rewrites a follow-up into a standalone question and splits a
   multi-part request into up to 3 sub-queries.

@@ -238,3 +238,43 @@ def test_vague_questions_are_detected():
 
 def test_fullwidth_citations_are_normalised():
     assert rag._tidy("It is cotton【1】 and silk 【2†source】.") == "It is cotton[1] and silk [2]."
+
+
+def test_cards_show_full_top_k_with_cited_first():
+    def hit(i):
+        return {"id": str(i), "distance": 0.2, "source": "both",
+                "metadata": {"name": f"Product {i}", "brand": "B", "price": 100.0 * i, "colour": "Blue",
+                             "avg_rating": 4.0, "img": ""}}
+    flat = [hit(i) for i in range(1, 6)]
+    out = rag._sources(flat, "The best one is Product 3 [3], then Product 1 [1].")
+    assert [s["n"] for s in out] == [1, 3, 2, 4, 5]
+    assert [s["cited"] for s in out] == [True, True, False, False, False]
+    assert rag._sources(flat, "Sorry, I couldn't find that in the catalogue.") == []
+
+
+def test_relative_price_words_sort():
+    assert Q.parse("show me cheaper red sarees", COLOURS, BRANDS).sort == "price_asc"
+    assert Q.parse("pricier ones", COLOURS, BRANDS).sort == "price_desc"
+    assert Q.parse("cheaper red sarees", COLOURS, BRANDS).residual == []      # "cheaper" is not a content word
+
+
+def test_citation_numbers_are_validated():
+    hits = _hits(999, 1999)
+    assert rag.bad_citations("Kurta [1] and saree [2].", hits) == []
+    assert rag.bad_citations("Kurta [1] and saree [7].", hits) == [7]
+    assert "citation" in " ".join(rag._problems("Kurta at ₹999 [3].", hits, ""))
+
+
+@pytest.mark.parametrize("text,n", [
+    ("show me 3 sarees", 3), ("top 10 kurtas", 10), ("top 15 kurtas", 10), ("five red kurtas", 5),
+    ("give me 2 options under 2000", 2), ("top 3 rated sarees", 3),
+    ("size 8 jeans", None), ("3/4 sleeve kurta", None), ("kurta under 3000", None),
+    ("the second one", None), ("top rated jeans", None), ("pack of 2 dupattas", None),
+    ("Which 2 of those are the cheapest?", 2), ("show me two of these", 2),
+])
+def test_requested_count(text, n):
+    assert Q.requested_count(text) == n
+
+
+def test_top_n_rated_still_sorts_by_rating():
+    assert Q.parse("top 3 rated sarees", COLOURS, BRANDS).sort == "rating_desc"
