@@ -112,6 +112,7 @@ def _where(spec: Q.Spec) -> dict | None:
     if spec.price_max is not None: conds.append({"price": {"$lte": float(spec.price_max)}})
     if spec.price_min is not None: conds.append({"price": {"$gte": float(spec.price_min)}})
     if spec.colours: conds.append({"colour": {"$in": list(spec.colours)}})
+    if spec.colours_exclude: conds.append({"colour": {"$nin": list(spec.colours_exclude)}})
     if spec.category: conds.append({"category": spec.category})
     if spec.brands: conds.append({"brand": {"$in": list(spec.brands)}})
     if spec.gender: conds.append({"gender": spec.gender})
@@ -125,6 +126,7 @@ def _mask(spec: Q.Spec, df) -> np.ndarray:
     if spec.price_max is not None: m &= (df["price"] <= spec.price_max).to_numpy()
     if spec.price_min is not None: m &= (df["price"] >= spec.price_min).to_numpy()
     if spec.colours: m &= df["colour"].isin(spec.colours).to_numpy()
+    if spec.colours_exclude: m &= ~df["colour"].isin(spec.colours_exclude).to_numpy()
     if spec.category: m &= (df["category"] == spec.category).to_numpy()
     if spec.brands: m &= df["brand"].isin(spec.brands).to_numpy()
     if spec.gender: m &= (df["gender"] == spec.gender).to_numpy()
@@ -215,10 +217,8 @@ def _relax(spec: Q.Spec):
         spec = replace(spec, colours=[])
         dropped.append("colour")
         yield spec, " and ".join(dropped)
-    if spec.gender:
-        spec = replace(spec, gender=None)
-        dropped.append("gender")
-        yield spec, " and ".join(dropped)
+    # Gender is intentionally NOT relaxed: showing women's items for a "men's"
+    # request is misleading. An unstocked gender is answered honestly up front.
 
 
 # ------------------------------------------------------------ understanding ---
@@ -421,6 +421,19 @@ def answer(query: str, history: list | None = None, k: int = config.TOP_K, hybri
             spec = Q.parse(sq, st.colours, st.brands)
             if len(subs) == 1 and Q.is_vague(spec) and price_max is None and not colour:
                 return _reply(VAGUE_MESSAGE, "clarify", plan=plan)
+            # Hard constraint the catalogue cannot meet (e.g. men's kurtas): say so
+            # instead of silently dropping the gender and showing women's items.
+            # Category-aware: there are a few men's items but zero men's kurtas.
+            if spec.gender:
+                gpool = st.products["gender"] == spec.gender
+                if spec.category:
+                    gpool = gpool & (st.products["category"] == spec.category)
+                if not bool(gpool.any()):
+                    g = {"Men": "men's", "Boys": "boys'", "Girls": "girls'",
+                         "Kids": "kids'"}.get(spec.gender, spec.gender.lower() + "'s")
+                    what = (spec.category or "items").lower()
+                    return _reply(f"No {g} {what} to show right now — this is a women's & "
+                                  f"girls' catalogue.", "unsupported", plan=plan)
             if price_max is not None:
                 spec.price_max = min(spec.price_max or price_max, price_max)
             if colour:

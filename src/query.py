@@ -72,6 +72,7 @@ class Spec:
     price_max: float | None = None
     price_min: float | None = None
     colours: list = field(default_factory=list)     # catalogue colour values
+    colours_exclude: list = field(default_factory=list)  # colours to exclude ("not black")
     category: str | None = None
     brands: list = field(default_factory=list)
     gender: str | None = None                       # only set for Men / Boys / Girls / Kids
@@ -89,6 +90,7 @@ class Spec:
         if self.brands: parts.append("brand = " + " or ".join(self.brands))
         if self.category: parts.append(f"category = {self.category}")
         if self.colours: parts.append("colour in {" + ", ".join(self.colours) + "}")
+        if self.colours_exclude: parts.append("colour not in {" + ", ".join(self.colours_exclude) + "}")
         if self.gender: parts.append(f"gender = {self.gender}")
         if self.price_min is not None: parts.append(f"price >= Rs {self.price_min:.0f}")
         if self.price_max is not None: parts.append(f"price <= Rs {self.price_max:.0f}")
@@ -133,6 +135,40 @@ def parse_colours(text: str, catalogue_colours: list) -> list:
     return found
 
 
+# --------------------------------------------------------- negated colours ---
+_NEG_CUE = r"(?:not|no|without|except|excluding|other than|isn'?t|aren'?t|non)"
+_NEG_FILL = r"(?:\s+(?:a|an|the|in|any|of|colou?r(?:ed)?))*"
+
+
+def _colour_terms(catalogue_colours: list) -> dict:
+    """word -> catalogue colours it denotes ('blue' -> Blue, Navy Blue, ...)."""
+    terms: dict = {}
+    for c in catalogue_colours:                       # full names map to themselves
+        terms.setdefault(c.lower(), set()).add(c)
+    for c in catalogue_colours:                       # head words, minus ambiguous ones
+        head = c.lower().split()[-1]
+        if head not in _AMBIGUOUS_COLOURS:
+            terms.setdefault(head, set()).add(c)
+    return terms
+
+
+def parse_negated_colours(text: str, catalogue_colours: list) -> tuple[list, str]:
+    """Pull out negated colours ('kurta that isn't black') as an exclude list and
+    strip the negated phrase, so 'black' is not also read as a wanted colour or a
+    search term. Returns (excluded_colours, text_with_the_negation_removed)."""
+    terms = _colour_terms(catalogue_colours)
+    alt = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
+    rx = re.compile(rf"\b{_NEG_CUE}\b{_NEG_FILL}\s+({alt})\b", re.I)
+    excluded: list = []
+    cleaned = text
+    for m in rx.finditer(text):
+        for c in terms.get(m.group(1).lower(), ()):
+            if c not in excluded:
+                excluded.append(c)
+        cleaned = cleaned.replace(m.group(0), " ")
+    return excluded, cleaned
+
+
 def parse_brands(text: str, catalogue_brands: list) -> list:
     found, masked = [], text
     for b in catalogue_brands:                        # longest names first
@@ -154,7 +190,10 @@ def parse(text: str, colours: list, brands: list) -> Spec:
     residue = text
     for b in spec.brands:
         residue = re.sub(re.escape(b), " ", residue, flags=re.I)
-    spec.colours = parse_colours(residue, colours)
+    # Negated colours become an exclude filter; the negated phrase is removed so
+    # it is not read as a wanted colour, a category word or a search term.
+    spec.colours_exclude, residue = parse_negated_colours(residue, colours)
+    spec.colours = [c for c in parse_colours(residue, colours) if c not in spec.colours_exclude]
     cats = find_categories(residue)
     spec.category = cats[0] if cats else None
     g = gender_of(residue)
@@ -163,8 +202,9 @@ def parse(text: str, colours: list, brands: list) -> Spec:
         if rx.search(text):
             spec.sort = name
             break
+    _, clean = parse_negated_colours(text, colours)   # keep "black" out of the search text
     extra = [words for rx, words in _EXPANSIONS if rx.search(text)]
-    spec.search_text = " ".join([text] + extra)
+    spec.search_text = " ".join([clean] + extra)
     # What is left once brands, colours, the category word, numbers and filler are removed.
     covered = set(tokenize(" ".join(spec.colours))) | {stem(w) for w in _GENERIC}
     leftover = _CATEGORY_WORDS.sub(" ", residue)
