@@ -278,3 +278,31 @@ def test_requested_count(text, n):
 
 def test_top_n_rated_still_sorts_by_rating():
     assert Q.parse("top 3 rated sarees", COLOURS, BRANDS).sort == "rating_desc"
+
+
+@pytest.mark.parametrize("text,include,exclude", [
+    ("kurta that isn't black", set(), {"Black"}),
+    ("kurta that isn\u2019t black", set(), {"Black"}),                 # curly apostrophe
+    ("I don't want black, show me kurtas", set(), {"Black"}),
+    ("kurtas in any colour but black", set(), {"Black"}),
+    ("non-black kurta", set(), {"Black"}),
+    ("dark kurta not navy", set(), {"Navy Blue"}),                      # alias
+    ("saree that is not off-white", set(), {"Off White"}),
+    ("kurta not blue", set(), {"Blue", "Navy Blue", "Turquoise Blue"}),  # whole family
+    ("black and white kurta not red", {"Black", "White", "Off White"}, {"Red"}),
+    ("black kurta but cheaper", {"Black"}, set()),                      # "but" alone is not a negation
+    ("black kurta under 2000", {"Black"}, set()),
+])
+def test_colour_negation(text, include, exclude):
+    s = Q.parse(text, COLOURS, BRANDS)
+    assert (set(s.colours), set(s.colours_exclude)) == (include, exclude)
+    for word in ("black", "navy", "red"):
+        if any(c.lower().startswith(word) for c in exclude):
+            assert word not in s.search_text.lower()                      # excluded colour is not searched for
+
+
+def test_unstocked_gender_is_answered_honestly(tiny_catalogue, monkeypatch):
+    monkeypatch.setattr(index, "embed_documents", _fake_embed)
+    r = rag.answer("kurta for men")
+    assert r["status"] == "unsupported" and r["sources"] == []
+    assert "men's kurta" in r["answer"] and "women" in r["answer"]

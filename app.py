@@ -144,14 +144,11 @@ with st.sidebar:
     use_price = st.checkbox("Filter by max price")
     price_max = st.slider("Max price (₹)", 200, 20000, 3000, step=100) if use_price else None
 
-    use_colour = st.checkbox("Filter by colour")
-    colour = (
-        st.selectbox("Colour", ["Black", "White", "Blue", "Red", "Green", "Pink",
-                                 "Yellow", "Maroon", "Grey", "Beige",
-                                 "Purple", "Orange", "Brown"],
-                     help="Includes shades: Blue also matches Navy Blue and Turquoise Blue.")
-        if use_colour else None
-    )
+    # "Any colour" is the default, so no colour is applied until the user picks one.
+    colour = st.selectbox("Filter by colour", ["Any colour", "Black", "White", "Blue", "Red", "Green", "Pink",
+                                               "Yellow", "Maroon", "Grey", "Beige", "Purple", "Orange", "Brown"],
+                          help="Includes shades: Blue also matches Navy Blue and Turquoise Blue.")
+    colour = None if colour == "Any colour" else colour
 
     show_sources = st.checkbox("Show product images", value=True)
 
