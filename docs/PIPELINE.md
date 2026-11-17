@@ -69,6 +69,10 @@ answer unit. No overlap is needed because there is no splitting.
   Blue, Turquoise Blue), brands, product category, gender, sort intent
   (`cheapest`, `best rated`, `cheaper ones`), and a requested count (`show me 3
   sarees`, `top 10 kurtas`), which overrides the sidebar's top-k (maximum 10).
+  Negated colours (`not black`, `isn't black`, `don't want black`, `anything but
+  black`, `non-black`, `not navy`) become exclude filters, and a gender the
+  catalogue does not stock (`kurta for men`) gets an honest reply instead of
+  substitute products.
 - **One small LLM call, only when needed** (there is chat history, or the question
   looks multi-part): rewrites a follow-up into a standalone question and splits a
   multi-part request into up to 3 sub-queries.

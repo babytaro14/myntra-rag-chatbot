@@ -138,7 +138,9 @@ def parse_colours(text: str, catalogue_colours: list) -> list:
 
 
 # --------------------------------------------------------- negated colours ---
-_NEG_CUE = r"(?:not|no|without|except|excluding|other than|isn'?t|aren'?t|non)"
+_NEG_CUE = (r"(?:not|no|without|except|excluding|other than|isn'?t|aren'?t|non"
+            r"|(?:don'?t|do not|doesn'?t|does not)\s+(?:want|like|need|prefer)"
+            r"|(?:anything|any colou?r|any shade|everything)\s+but)")
 _NEG_FILL = r"(?:\s+(?:a|an|the|in|any|of|colou?r(?:ed)?))*"
 
 
@@ -151,6 +153,9 @@ def _colour_terms(catalogue_colours: list) -> dict:
         head = c.lower().split()[-1]
         if head not in _AMBIGUOUS_COLOURS:
             terms.setdefault(head, set()).add(c)
+    for alias, real in _COLOUR_ALIASES.items():       # "not navy" means not Navy Blue
+        if real in terms:
+            terms.setdefault(alias, set()).update(terms[real])
     return terms
 
 
@@ -160,7 +165,7 @@ def parse_negated_colours(text: str, catalogue_colours: list) -> tuple[list, str
     search term. Returns (excluded_colours, text_with_the_negation_removed)."""
     terms = _colour_terms(catalogue_colours)
     alt = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
-    rx = re.compile(rf"\b{_NEG_CUE}\b{_NEG_FILL}\s+({alt})\b", re.I)
+    rx = re.compile(rf"\b{_NEG_CUE}\b{_NEG_FILL}[\s-]+({alt})\b", re.I)    # [\s-]: "non-black"
     excluded: list = []
     cleaned = text
     for m in rx.finditer(text):
@@ -184,7 +189,16 @@ def parse_brands(text: str, catalogue_brands: list) -> list:
     return found
 
 
+_CURLY = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"'})
+
+
+def normalise(text: str) -> str:
+    """Straight apostrophes (phones and Macs type "isn\u2019t") and one spelling of off-white."""
+    return re.sub(r"\boff-white\b", "off white", str(text).translate(_CURLY), flags=re.I)
+
+
 def parse(text: str, colours: list, brands: list) -> Spec:
+    text = normalise(text)
     spec = Spec(text=text)
     spec.price_min, spec.price_max = parse_prices(text)
     spec.brands = parse_brands(text, brands)
