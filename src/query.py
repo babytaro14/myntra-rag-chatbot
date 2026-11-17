@@ -21,9 +21,9 @@ def _amount(digits: str, k: str | None) -> float:
 
 # --------------------------------------------------------------------- sort ---
 _SORTS = [
-    ("price_asc", re.compile(r"\b(?:cheapest|least expensive|lowest[- ]priced?|lowest price|most affordable|most budget)\b", re.I)),
-    ("price_desc", re.compile(r"\b(?:most expensive|priciest|costliest|highest[- ]priced?|highest price|most premium)\b", re.I)),
-    ("rating_desc", re.compile(r"\b(?:best|highest|top)[- ](?:rated|rating|reviewed|reviews)\b|\bmost (?:popular|loved)\b|\bbest ratings?\b", re.I)),
+    ("price_asc", re.compile(r"\b(?:cheapest|cheaper|least expensive|less expensive|lowest[- ]priced?|lowest price|lower[- ]priced?|lower price|most affordable|more affordable|most budget)\b", re.I)),
+    ("price_desc", re.compile(r"\b(?:most expensive|more expensive|priciest|pricier|costliest|costlier|highest[- ]priced?|highest price|higher[- ]priced?|most premium)\b", re.I)),
+    ("rating_desc", re.compile(r"\b(?:best|highest|top)(?:\s+\d{1,2})?[- ](?:rated|rating|reviewed|reviews)\b|\bmost (?:popular|loved)\b|\bbest ratings?\b", re.I)),
 ]
 
 # ------------------------------------------------------------------ intents ---
@@ -55,9 +55,11 @@ _EXPANSIONS = [
     (re.compile(r"\bsix[- ]yards?\b", re.I), "saree"),
     (re.compile(r"\b(?:puja|pooja|diwali|eid|navratri|festival)\b", re.I), "festive ethnic traditional wear"),
     (re.compile(r"\b(?:gym|workout|yoga|running|jogging)\b", re.I), "sports activewear"),
+    (re.compile(r"\b(?:party ?wear|partywear|cocktail|night out|clubbing)\b", re.I), "party wear occasion party"),
 ]
 # Words that carry no product meaning once filters and sort order are parsed out.
-_GENERIC = frozenset("""best highest top rated rating ratings reviewed review popular loved cheapest least most
+_GENERIC = frozenset("""best highest top rated rating ratings reviewed review popular loved cheapest cheaper pricier
+costlier lower higher ones least most one two three four five six seven eight nine ten
 expensive lowest priced price prices cost costs affordable budget premium priciest costliest under below above over
 between rupee rupees rs inr less more than within upto up max min maximum minimum at least one ones item items
 product products catalogue catalog myntra have got sell available options option suggest recommend tell give get
@@ -212,3 +214,30 @@ def is_vague(spec: Spec) -> bool:
     """Nothing to search on: no filter, no content word, no known occasion."""
     return not spec.anchored and not spec.residual and spec.search_text == spec.text \
         and spec.price_max is None and spec.price_min is None
+
+
+# ------------------------------------------------------------- result count ---
+MAX_COUNT = 10
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                 "eight": 8, "nine": 9, "ten": 10}
+_NUM = r"(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")"
+# "top 10 kurtas", "show me 3 sarees", "give me five options"
+_COUNT_AFTER_VERB = re.compile(r"\b(?:top|best|first|which|show(?:\s+me)?|give(?:\s+me)?|list|suggest|recommend|find|get)\s+"
+                               r"(?:me\s+)?(?:the\s+)?(?:any\s+)?" + _NUM + r"(?!\s*[/%.\d])\b", re.I)
+# "5 red kurtas", "three options"
+_COUNT_NOUNS = "|".join(p for _, p in CATEGORY_PATTERNS) + r"|options?\b|items?\b|products?\b|picks?\b|ones\b|choices?\b|styles?\b|designs?\b|of (?:those|these|them)\b"
+_COUNT_BEFORE_NOUN = re.compile(r"(?<![/\d.,])\b" + _NUM + r"\s+(?:[a-z&'-]+\s+){0,3}?(?:" + _COUNT_NOUNS + r")", re.I)
+_SIZE_WORD = re.compile(r"\b(?:size|sizes|uk|us|eu|waist|length|pack of|set of)\s*$", re.I)
+
+
+def requested_count(text: str) -> int | None:
+    """How many products the user asked for ('show me 3 sarees' -> 3), capped at MAX_COUNT."""
+    for rx in (_COUNT_AFTER_VERB, _COUNT_BEFORE_NOUN):
+        for m in rx.finditer(text):
+            if _SIZE_WORD.search(text[:m.start(1)]):
+                continue                                  # "size 8 jeans" is not a count
+            raw = m.group(1).lower()
+            n = _NUMBER_WORDS.get(raw) or int(raw)
+            if 1 <= n:
+                return min(n, MAX_COUNT)
+    return None

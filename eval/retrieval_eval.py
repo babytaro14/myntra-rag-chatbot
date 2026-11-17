@@ -24,7 +24,7 @@ for group, q, rel in queries:
     for mode, hybrid, filters in [("semantic, no filters", False, False), ("hybrid, no filters", True, False),
                                   ("semantic + filters", False, True), ("hybrid + filters", True, True)]:
         spec = Q.parse(q, st.colours, st.brands) if filters else Q.Spec(text=q)
-        hits, _, _ = rag.search(spec, 10, hybrid)
+        hits, _, _, _ = rag.search(spec, 10, hybrid)
         rows.append({"group": group, "query": q, "n_rel": len(rel), "mode": mode,
                      **metrics([h["id"] for h in hits], rel),
                      "top3": [h["metadata"]["name"][:50] for h in hits[:3]]})

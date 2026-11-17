@@ -81,10 +81,16 @@ BADGE = {"both": "🔵🟢 both", "semantic": "🔵 semantic", "keyword": "🟢 
 
 
 def render_products(sources: list[dict]) -> None:
-    """Show the products the answer actually cited."""
-    if not sources:
-        return
-    st.caption("🛍️ Products cited in this answer")
+    """Show the products in the answer first, then the rest of the search results."""
+    cited = [s for s in sources if s.get("cited", True)]
+    more = [s for s in sources if not s.get("cited", True)]
+    for caption, group in (("🛍️ Products in this answer", cited), ("More results from this search", more)):
+        if group:
+            st.caption(caption)
+            _cards(group)
+
+
+def _cards(sources: list[dict]) -> None:
     cols = st.columns(min(len(sources), 5))
     for i, s in enumerate(sources[:10]):
         with cols[i % len(cols)]:
@@ -131,7 +137,9 @@ with st.sidebar:
                            help="Combine meaning-based vector search with BM25 "
                                 "keyword matching. Better at exact terms like "
                                 "brand names and fabrics.")
-    top_k = st.slider("Products to retrieve (top-k)", 3, 10, config.TOP_K)
+    top_k = st.slider("Products to retrieve (top-k)", 3, 10, config.TOP_K,
+                      help="A number in your question wins: \"show me 3 sarees\" shows 3, "
+                           "\"top 10 kurtas\" shows 10 (maximum 10).")
 
     use_price = st.checkbox("Filter by max price")
     price_max = st.slider("Max price (₹)", 200, 20000, 3000, step=100) if use_price else None
