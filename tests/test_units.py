@@ -306,3 +306,60 @@ def test_unstocked_gender_is_answered_honestly(tiny_catalogue, monkeypatch):
     r = rag.answer("kurta for men")
     assert r["status"] == "unsupported" and r["sources"] == []
     assert "men's kurta" in r["answer"] and "women" in r["answer"]
+
+
+# ------------------------------------------------------------ messy inputs ---
+@pytest.mark.parametrize("raw,clean", [
+    ("i need a reddd anarkali kurta nd a matchng duppatta for diwali under 3k",
+     "i need a red anarkali kurta and a matching dupatta for diwali under 3k"),
+    ("heyyy what should i wear??", "hey what should i wear??"),
+    ("lehnga for wedding", "lehenga for wedding"),
+    ("short kurta", "short kurta"),                        # not "shorts": singular/plural is left alone
+    ("Classsic black top", "classic black top"),
+    ("anything from W under 2000?", "anything from W under 2000?"),
+])
+def test_normalise_fixes_typos_and_shorthand(raw, clean):
+    assert Q.normalise(raw) == clean
+
+
+def test_question_categories_need_whole_words():
+    assert find_categories("do you sell running shoes or a laptop bag?", whole_words=True) == []
+    assert find_categories("a crop top and a t-shirt", whole_words=True) == ["Top"]
+    assert category_of("MANGO Women Blue Denim Waistcoat") == "Jacket"     # product names keep the loose match
+
+
+def test_common_word_brand_after_cue():
+    brands = sorted(BRANDS + ["W"], key=len, reverse=True)
+    assert Q.parse("anything from W under 2000?", COLOURS, brands).brands == ["W"]
+    assert Q.parse("anything from max under 2000", COLOURS, brands).brands == ["max"]
+    assert Q.parse("max price 2000 for a kurta", COLOURS, brands).brands == []
+
+
+def test_greeting_is_vague_and_single_is_filler():
+    assert Q.is_vague(Q.parse("heyyy \U0001F60D what should i wear??", COLOURS, BRANDS))
+    assert Q.parse("whats the single best rated lehenga you have", COLOURS, BRANDS).residual == []
+
+
+def test_non_clothing_products():
+    assert Q.unsupported_products("do you sell running shoes or a laptop bag?") == ["footwear", "electronics", "bags"]
+    assert Q.unsupported_products("a dress to go with white sneakers") == ["footwear"]   # answer() still searches: a category is named
+    assert Q.parse("kurta in size 38 under 200", COLOURS, BRANDS).residual == []         # "size" is not a product detail
+
+
+def test_price_checker_reads_k_budgets():
+    assert rag.unsupported_prices("Both are within your ₹3,000 budget.", _hits(1999, 999), "kurta under 3k") == []
+
+
+def test_non_clothing_question_gets_clothing_only_reply(tiny_catalogue, monkeypatch):
+    monkeypatch.setattr(index, "embed_documents", _fake_embed)
+    r = rag.answer("do you sell running shoes or a laptop bag?")
+    assert r["status"] == "unsupported" and "only has clothing" in r["answer"] and r["sources"] == []
+
+
+def test_over_budget_shows_cheapest_alternatives(tiny_catalogue, monkeypatch):
+    monkeypatch.setattr(index, "embed_documents", _fake_embed)
+    monkeypatch.setattr(rag, "generate", lambda q, s, ctx, flat, subs=None: ("listing", "ok"))
+    r = rag.answer("red kurta under 200", k=3)
+    prices = [h["metadata"]["price"] for h in r["retrieved"]]
+    assert prices == sorted(prices) and prices[0] == 600.0            # tiny catalogue starts at 600
+    assert "cheapest matches" in r["plan"]["notes"][0]

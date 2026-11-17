@@ -1,12 +1,13 @@
 """Query understanding: turn free text into hard constraints, a sort order and
 an intent, without an LLM. Everything here is deterministic and unit-tested."""
 
+import difflib
 import re
 from dataclasses import dataclass, field
 
-from textutil import CATEGORY_PATTERNS, find_categories, gender_of, stem, tokenize
+from textutil import CATEGORY_PATTERNS, STOPWORDS, find_categories, gender_of, stem, tokenize
 
-_CATEGORY_WORDS = re.compile("|".join(p for _, p in CATEGORY_PATTERNS), re.I)
+_CATEGORY_WORDS = re.compile("|".join(r"(?<![a-z])(?:" + p + ")" for _, p in CATEGORY_PATTERNS), re.I)
 
 # ------------------------------------------------------------------- prices ---
 _NUM = r"(?:₹|rs\.?|inr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k\b)?"
@@ -64,7 +65,9 @@ expensive lowest priced price prices cost costs affordable budget premium pricie
 between rupee rupees rs inr less more than within upto up max min maximum minimum at least one ones item items
 product products catalogue catalog myntra have got sell available options option suggest recommend tell give get
 see list compare good nice great women woman ladies lady girl girls men boy boys kids kid wear clothes clothing
-outfit dress which whats how much many all only also really overall ever something anything thing things stuff pretty beautiful lovely cool""".split())
+outfit dress which whats how much many all only also really overall ever something anything thing things stuff pretty beautiful lovely cool
+single exactly just hey hi hello hii hiya yo heya namaste sup should could would please help wearing wanna gonna
+size sizes sized""".split())
 
 
 @dataclass
@@ -176,10 +179,18 @@ def parse_negated_colours(text: str, catalogue_colours: list) -> tuple[list, str
     return excluded, cleaned
 
 
+_BRAND_CUE = r"\b(?:from|by|brand(?:ed)?|label)\s+"
+
+
 def parse_brands(text: str, catalogue_brands: list) -> list:
     found, masked = [], text
     for b in catalogue_brands:                        # longest names first
         if b.lower() in _COMMON_WORD_BRANDS or len(b) < 2:
+            # Ordinary-word brand names ("W", "max", "Only") count only right after a brand cue.
+            rx = re.compile(_BRAND_CUE + re.escape(b) + r"(?![\w&])", 0 if len(b) < 3 else re.I)
+            if rx.search(masked):
+                found.append(b)
+                masked = re.sub(re.escape(b) + r"(?![\w&])", " ", masked, count=1)
             continue
         flags = re.I if len(b) >= 4 else 0             # very short names must match case exactly
         rx = re.compile(r"(?<![\w&])" + re.escape(b) + r"(?![\w&])", flags)
@@ -192,9 +203,43 @@ def parse_brands(text: str, catalogue_brands: list) -> list:
 _CURLY = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"'})
 
 
+# Chat shorthand and the fashion words worth spell-correcting ("duppatta", "matchng").
+_SHORTHAND = {"nd": "and", "n": "and", "wid": "with", "wth": "with", "plz": "please", "pls": "please",
+              "u": "you", "ur": "your", "r": "are", "abt": "about", "tho": "though"}
+_VOCAB = sorted(set("""
+kurta kurtas kurti kurtis saree sarees sari dupatta dupattas lehenga lehengas choli anarkali sharara
+palazzo palazzos dress dresses gown frock jeans trousers pants leggings skirt skirts jacket jackets blazer
+sweatshirt hoodie sweater cardigan shrug top tops shirt shirts tunic blouse jumpsuit shorts co-ords
+matching match with and festive ethnic party wedding casual formal office diwali cotton silk georgette
+chiffon rayon linen denim velvet embroidered printed floral solid sequinned zari chikankari
+black white blue navy red green pink yellow maroon grey gray beige purple orange brown mustard peach
+olive teal cream lavender magenta rust gold silver burgundy turquoise coral
+cheap cheapest under below above budget rated rating price women girls kids""".split()))
+_VOCAB_SET = frozenset(_VOCAB)
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
+
+
+def _fix_word(w: str) -> str:
+    low = w.lower()
+    if low in _SHORTHAND and w == low:
+        return _SHORTHAND[low]
+    # Letter runs: "reddd" -> "red", "heyyy" -> "hey", but "classsic" -> "classic".
+    two, one = re.sub(r"([a-z])\1{2,}", r"\1\1", low), re.sub(r"([a-z])\1{2,}", r"\1", low)
+    known = _VOCAB_SET | _GENERIC | STOPWORDS
+    squeezed = one if (one in known and two not in known) else two
+    if squeezed in known or len(squeezed) < 5 or not squeezed.isalpha():
+        return squeezed if squeezed != low else w
+    near = difflib.get_close_matches(squeezed, _VOCAB, n=1, cutoff=0.88)
+    if near and near[0].rstrip("s") != squeezed.rstrip("s"):   # leave singular/plural to the stemmer
+        return near[0]
+    return squeezed if squeezed != low else w
+
+
 def normalise(text: str) -> str:
-    """Straight apostrophes (phones and Macs type "isn\u2019t") and one spelling of off-white."""
-    return re.sub(r"\boff-white\b", "off white", str(text).translate(_CURLY), flags=re.I)
+    """Straight apostrophes (phones and Macs type "isn\u2019t"), one spelling of off-white,
+    chat shorthand ("nd" -> "and") and typos in fashion words ("reddd", "duppatta")."""
+    text = re.sub(r"\boff-white\b", "off white", str(text).translate(_CURLY), flags=re.I)
+    return _WORD_RE.sub(lambda m: _fix_word(m.group(0)), text)
 
 
 def parse(text: str, colours: list, brands: list) -> Spec:
@@ -210,7 +255,7 @@ def parse(text: str, colours: list, brands: list) -> Spec:
     # it is not read as a wanted colour, a category word or a search term.
     spec.colours_exclude, residue = parse_negated_colours(residue, colours)
     spec.colours = [c for c in parse_colours(residue, colours) if c not in spec.colours_exclude]
-    cats = find_categories(residue)
+    cats = find_categories(residue, whole_words=True)
     spec.category = cats[0] if cats else None
     g = gender_of(residue)
     spec.gender = g if g in ("Men", "Boys", "Girls", "Kids") else None
@@ -226,6 +271,33 @@ def parse(text: str, colours: list, brands: list) -> Spec:
     leftover = _CATEGORY_WORDS.sub(" ", residue)
     spec.residual = [t for t in tokenize(leftover) if t not in covered and not t.isdigit() and len(t) > 1]
     return spec
+
+
+_NON_CLOTHING = re.compile(
+    r"\b(?:shoes?|sneakers?|footwear|sandals?|heels|slippers?|flip[- ]?flops?|boots|bags?|handbags?|backpacks?|"
+    r"wallets?|purses?|clutch(?:es)?|wrist ?watch(?:es)?|smart ?watch(?:es)?|watches|jewell?ery|necklaces?|earrings?|"
+    r"bracelets?|rings|sunglasses|perfumes?|make-?up|lipsticks?|cosmetics|laptops?|phones?|mobiles?|electronics|"
+    r"headphones|earphones)\b", re.I)
+
+
+_NON_CLOTHING_GROUP = [("footwear", r"shoe|sneaker|footwear|sandal|heel|slipper|flip|boot"),
+                       ("bags", r"bag|backpack|wallet|purse|clutch"),
+                       ("jewellery or watches", r"watch|jewel|necklace|earring|bracelet|ring"),
+                       ("beauty products", r"perfume|make|lipstick|cosmetic"),
+                       ("electronics", r"laptop|phone|mobile|electronic|headphone|earphone"),
+                       ("sunglasses", r"sunglass")]
+
+
+def unsupported_products(text: str) -> list:
+    """Groups of non-clothing items asked for ("running shoes or a laptop bag" ->
+    footwear, electronics, bags), in the order mentioned."""
+    seen = []
+    for m in _NON_CLOTHING.finditer(text):
+        w = m.group(0).lower()
+        group = next(g for g, rx in _NON_CLOTHING_GROUP if re.match(rx, w))
+        if group not in seen:
+            seen.append(group)
+    return seen
 
 
 def unsupported_topic(text: str) -> str | None:

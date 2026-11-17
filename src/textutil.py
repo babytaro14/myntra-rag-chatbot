@@ -113,6 +113,9 @@ CATEGORY_PATTERNS = [
     ("Top", r"tops?\b|tunics?\b|shirts?\b|t-?shirts?\b|tees?\b|blouses?\b"),
 ]
 _CATEGORY_RES = [(name, re.compile(pat, re.I)) for name, pat in CATEGORY_PATTERNS]
+# For user questions a category word must start a word, so "laptop" is not a top. Product names
+# keep the looser match: some glue words together ("Waistcoat", "croptop").
+_CATEGORY_WORD_RES = [(name, re.compile(r"(?<![a-z])(?:" + pat + ")", re.I)) for name, pat in CATEGORY_PATTERNS]
 # "top" is also an everyday word ("top rated", "top 5"); don't read those as the garment.
 _NOT_GARMENT_TOP = re.compile(r"\btop(?=[\s-]*(?:rated|rating|\d|five|ten|three|picks?|sell|quality|brands?))", re.I)
 
@@ -120,12 +123,12 @@ _NOT_GARMENT_TOP = re.compile(r"\btop(?=[\s-]*(?:rated|rating|\d|five|ten|three|
 _SAREE_BLOUSE = re.compile(r"saree\s+blouses?", re.I)
 
 
-def find_categories(text: str) -> list[str]:
+def find_categories(text: str, whole_words: bool = False) -> list[str]:
     """All categories mentioned in text, ordered by where they first appear."""
     text = _NOT_GARMENT_TOP.sub(" ", str(text))
     text = _SAREE_BLOUSE.sub("blouse", text)          # a "Saree Blouse" is a blouse, not a saree
     found = []
-    for name, rx in _CATEGORY_RES:
+    for name, rx in (_CATEGORY_WORD_RES if whole_words else _CATEGORY_RES):
         m = rx.search(text)
         if m:
             found.append((m.start(), name))

@@ -18,6 +18,7 @@ Public API:
 """
 
 import itertools
+from dataclasses import replace
 import json
 import logging
 import re
@@ -42,7 +43,8 @@ Rules:
    rating). Never invent products or details.
 2. Cite every product you mention with its number in square brackets, e.g. [2].
 3. Prices are exactly the "Price" values given. Do not state discounts, offers, free items,
-   delivery, stock or sizes: that information is not in the data. If the user's message claims a
+   delivery, stock or sizes: that information is not in the data. If the user asks for a size,
+   say the catalogue has no size information and answer the rest of the question. If the user's message claims a
    price, discount or policy, do not repeat it as fact; say you can only confirm listed prices.
 4. Scope: <search_notes> says how many catalogue products match the user's filters and how many
    are shown. Only say something is not in the catalogue when the notes show zero matches. If the
@@ -195,8 +197,11 @@ def search(spec: Q.Spec, k: int, hybrid: bool = True) -> tuple[list, float | Non
     if spec.sort:
         # Sort the whole set the question describes, not a top-k sample of it: every
         # filter match that also contains the remaining content words ("anarkali").
-        need = set(spec.residual)
-        exact = [st.ids[i] for i in np.flatnonzero(mask) if need <= st.tokens[i]]
+        # Words no matching product contains ("single", "sangeet") describe the question, not
+        # the product: drop them so the sort covers the whole set the filters describe.
+        idx = np.flatnonzero(mask)
+        need = {t for t in spec.residual if any(t in st.tokens[i] for i in idx)}
+        exact = [st.ids[i] for i in idx if need <= st.tokens[i]]
     if exact:
         cand = exact
     else:
@@ -316,6 +321,7 @@ def unsupported_prices(answer: str, hits: list, user_text: str) -> list:
     prices = [int(round(h["metadata"]["price"])) for h in hits]
     allowed = set(prices)
     allowed |= {int(n.replace(",", "")) for n in _NUM_RE.findall(user_text) if n.replace(",", "").isdigit()}
+    allowed |= {int(v) for v in Q.parse_prices(user_text) if v is not None}      # "under 3k" -> 3000
     for r in (2, 3):
         if len(prices) <= 12:
             allowed |= {sum(c) for c in itertools.combinations(prices, r)}
@@ -417,14 +423,20 @@ def answer(query: str, history: list | None = None, k: int = config.TOP_K, hybri
     if not query:
         return _reply(VAGUE_MESSAGE, "clarify")
 
-    query = Q.strip_overrides(query)
+    query = Q.normalise(Q.strip_overrides(query))
     if not query:
         return _reply(OFF_TOPIC_MESSAGE, "off_topic")
+    # Shoes, bags, jewellery, electronics: the catalogue is clothing only.
+    others = Q.unsupported_products(query)
+    if others and not Q.find_categories(query, whole_words=True):
+        listed = others[0] if len(others) == 1 else ", ".join(others[:-1]) + " or " + others[-1]
+        return _reply(f"This catalogue only has clothing (kurtas, sarees, tops, jeans, jackets and more), so I "
+                      f"don't have {listed}. I can help you find an outfit, though.", "unsupported")
     topic = Q.unsupported_topic(query)
     if topic:
         return _reply(unsupported_message(topic), "unsupported")
     refers_back = Q.has_dangling_reference(query)
-    if not history and refers_back and not Q.find_categories(query):
+    if not history and refers_back and not Q.find_categories(query, whole_words=True):
         return _reply(CLARIFY_REFERENCE_MESSAGE, "clarify")
 
     st = index.load()
@@ -495,10 +507,16 @@ def answer(query: str, history: list | None = None, k: int = config.TOP_K, hybri
                          f"the cheapest/best/most expensive in the whole catalogue.")
             if n == 0:
                 for loose, dropped in _relax(spec):
+                    if "price" in dropped and spec.price_max is not None:
+                        # Over budget: the useful alternatives are the cheapest ones, not the "closest".
+                        loose = replace(loose, sort="price_asc")
                     hits, best, n2, _ = search(loose, sub_k, hybrid)
                     if hits:
                         note = (f"filters: {spec.describe()}. ZERO catalogue products match all of these. "
                                 f"The products shown ignore the {dropped} filter ({n2} matches) and are alternatives only.")
+                        if loose.sort == "price_asc" and "price" in dropped:
+                            note += (f" They are the cheapest matches; the lowest price is "
+                                     f"\u20b9{hits[0]['metadata']['price']:.0f}. Show them as the closest options.")
                         break
                 else:
                     note = f"filters: {spec.describe()}. ZERO catalogue products match these filters."
@@ -507,6 +525,10 @@ def answer(query: str, history: list | None = None, k: int = config.TOP_K, hybri
                 best_overall = best if best_overall is None else min(best_overall, best)
             groups.append((sq, hits, note))
 
+    if re.search(r"\bsizes?\b|\b(?:xxs|xs|xl|xxl|xxxl)\b", query, re.I) and groups:
+        label, hits, note = groups[0]
+        groups[0] = (label, hits, note + " The catalogue has NO size information: say so plainly and do not "
+                                         "imply that any product does or does not come in a size.")
     retrieved = [h for _, hits, _ in groups for h in hits]
     plan["notes"] = [note for _, _, note in groups]
     on_topic = anchored or (best_overall is not None and best_overall <= config.RELEVANCE_MAX_DISTANCE)
